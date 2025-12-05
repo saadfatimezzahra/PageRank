@@ -1,114 +1,104 @@
-#PageRank RDD Implementation
-
-import sys
-from operator import add
 from pyspark.sql import SparkSession
+from operator import add
+import sys
 
 DAMPING = 0.85
 ITERATIONS = 10
 
-def main(input_path: str, sample_ratio: float):
-    """
-    PageRank version RDD basé sur un fichier edges.csv :
-    chaque ligne = src,dst (déjà nettoyé).
-    sample_ratio = 0.1  -> on garde 10% des edges.
-    """
 
-    spark = SparkSession.builder.appName("PageRank-RDD").getOrCreate()
+def main(input_path, sample_ratio=1.0):
+    spark = SparkSession.builder \
+        .appName("PageRank-RDD-CSV") \
+        .getOrCreate()
+
     sc = spark.sparkContext
     sc.setLogLevel("WARN")
 
-    print(f"\n🔵 Lecture de : {input_path}")
-    print(f"🔵 Sample ratio = {sample_ratio}\n")
+    print(f"\n🔵 Lecture du fichier : {input_path}")
+    print(f"🔵 Sample ratio (10% = 0.1) : {sample_ratio}\n")
 
-    # 1. Lire le CSV en RDD (sans header)
-    #    Chaque élément = Row('_c0', '_c1')
-    raw_rdd = (
+    # 1️⃣ Lire edges.csv (src,dst)
+    # Format attendu : <url1>,<url2>
+    edges = (
         spark.read.csv(input_path, header=False)
              .rdd
-             .map(lambda row: (row[0], row[1]))  # (src, dst)
+             .map(lambda row: (row[0], row[1]))       # (src, dst)
+             .filter(lambda x: x[0] is not None and x[1] is not None)
     )
 
-    # 10% des données (ou autre fraction passée en paramètre)
-    if 0 < sample_ratio < 1.0:
-        raw_rdd = raw_rdd.sample(False, sample_ratio, seed=42)
+    # 2️⃣ Appliquer un échantillonnage (pour 10% dans le cloud)
+    if 0 < sample_ratio < 1:
+        edges = edges.sample(False, sample_ratio, seed=42)
 
-    # On enlève les doublons éventuels
-    edges = raw_rdd.distinct()          # (src, dst)
+    edges = edges.distinct().cache()
 
-    # 2. Construire la liste d'adjacence : (src, [dst1, dst2, ...])
-    #    C'est ici qu'on va être attentifs au partitionnement.
-    links = edges.groupByKey().mapValues(list)
+    print(f"🔵 Nombre total d'edges : {edges.count()}")
 
-    # Nombre de partitions (à adapter si besoin)
-    num_partitions = links.getNumPartitions()  # on garde celle de Spark
+    # 3️⃣ Construire la liste d'adjacence
+    links = edges.groupByKey().mapValues(list).cache()
 
-    # On "fixe" le partitionnement une bonne fois pour toutes
+    # Partitionnement pour éviter les shuffles sur links
+    num_partitions = links.getNumPartitions()
     links = links.partitionBy(num_partitions).cache()
 
-    # 3. Initialiser les ranks à 1.0 pour chaque page
-    pages = (
-        edges.flatMap(lambda e: [e[0], e[1]])
-             .distinct()
+    # 4️⃣ Pages uniques
+    pages = edges.flatMap(lambda e: [e[0], e[1]]).distinct()
+    print(f"🔵 Nombre de pages uniques : {pages.count()}\n")
+
+    # Initialisation des ranks = 1.0
+    ranks = (
+        pages.map(lambda p: (p, 1.0))
+             .partitionBy(num_partitions)
+             .cache()
     )
 
-    ranks = pages.map(lambda p: (p, 1.0)) \
-                 .partitionBy(num_partitions) \
-                 .cache()
+    print("\n===== 🚀 Début du calcul PageRank (RDD) =====\n")
 
-    print(f"🔵 Nombre de pages uniques : {pages.count()}")
-    print(f"🔵 Nombre de partitions    : {num_partitions}\n")
-
-    # 4. Boucle PageRank
+    # 5️⃣ Boucle PageRank
     for i in range(ITERATIONS):
         print(f"🔁 Itération {i+1}/{ITERATIONS}")
 
-        # join(links, ranks) NE reshuffle PAS links,
-        # car links & ranks ont le même partitionnement.
-        # -> on évite de reshuffler les "neighbours" (liste d'adjacence)
+        # join(links, ranks) ne provoque PAS de shuffle car partitionnement identique
         contribs = (
-            links.join(ranks)          # (page, ([neighbours], rank))
+            links.join(ranks)
                  .flatMap(
-                     lambda pr: [
-                         (dst, pr[1][1] / len(pr[1][0]))
-                         for dst in pr[1][0]
-                     ]
-                 )                    # (dst, contribution)
+                    lambda pr: [
+                        (dst, pr[1][1] / len(pr[1][0]))
+                        for dst in pr[1][0]
+                    ]
+                 )
         )
 
-        # reduceByKey implique un shuffle sur les contributions
-        # (on ne peut pas l'éviter complètement pour PageRank),
-        # mais on ne reshuffle plus la structure links.
+        # Somme des contributions (ce shuffle est inévitable)
         ranks = (
-            contribs
-            .reduceByKey(add)
-            .mapValues(lambda s: (1 - DAMPING) + DAMPING * s)
-            .partitionBy(num_partitions)
-            .cache()
+            contribs.reduceByKey(add)
+                    .mapValues(lambda s: (1 - DAMPING) + DAMPING * s)
+                    .partitionBy(num_partitions)
+                    .cache()
         )
 
+        # Affichage début + fin
         if i < 2 or i == ITERATIONS - 1:
-            print("Top 5 pages à cette itération :")
-            for page, r in ranks.takeOrdered(5, key=lambda x: -x[1]):
-                print(f"  {page:<40} {r}")
+            print("Top pages à cette itération :")
+            for p, r in ranks.takeOrdered(5, key=lambda x: -x[1]):
+                print(f"  {p:<40} {r}")
             print()
 
-    # 5. Résultat final
-    print("\n===== 🔥 TOP 20 PageRank (RDD) 🔥 =====")
+    # 6️⃣ Résultat final
+    print("\n===== 🔥 TOP 20 RÉSULTATS FINAUX 🔥 =====")
     top20 = ranks.takeOrdered(20, key=lambda x: -x[1])
-    for page, r in top20:
-        print(f"{page:<40} {r}")
+    for p, r in top20:
+        print(f"{p:<50} {r}")
 
-    print("\n🎉 Calcul RDD terminé.\n")
+    print("\n🎉 FIN — PageRank RDD exécuté correctement !\n")
     spark.stop()
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage : spark-submit pagerank_rdd.py <input_path> [sample_ratio]")
+        print("Usage: spark-submit pagerank_rdd.py <edges.csv> [sample_ratio]")
         sys.exit(1)
 
     input_path = sys.argv[1]
-    sample_ratio = float(sys.argv[2]) if len(sys.argv) > 2 else 0.1  # 10% par défaut
-
+    sample_ratio = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
     main(input_path, sample_ratio)
