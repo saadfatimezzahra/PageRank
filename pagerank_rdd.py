@@ -5,6 +5,7 @@ import time
 
 DAMPING = 0.85
 ITERATIONS = 10
+WIKILINK_PREDICATE = "<http://dbpedia.org/ontology/wikiPageWikiLink>"
 
 
 # ------------------------------------------------------------
@@ -36,26 +37,40 @@ def pretty_print(title, rows, limit=10):
 # Lecture du fichier TTL (RDF triples)
 # ------------------------------------------------------------
 def read_ttl(sc, input_path, sample_ratio):
-    # Lecture du fichier brut (décompressé automatiquement par Spark si .bz2)
+    # Spark décompresse automatiquement les .bz2
     rdd = sc.textFile(input_path)
 
-    # Nettoyage des lignes vides
-    rdd = rdd.map(lambda line: line.strip()) \
-             .filter(lambda line: len(line) > 0 and not line.startswith("#"))
+    # Nettoyage des lignes vides / commentaires
+    rdd = (
+        rdd.map(lambda line: line.strip())
+           .filter(lambda line: len(line) > 0 and not line.startswith("#"))
+    )
 
-    # Format DBpedia : 
+    # Format DBpedia :
     # <src> <predicate> <dst> .
     def parse_line(line):
         parts = line.split(" ")
-        if len(parts) < 3:
+        # On attend au moins : src, pred, dst, "."
+        if len(parts) < 4:
             return None
-        src = parts[0][1:-1]     # enlever < >
-        dst = parts[2][1:-1]
+
+        src = parts[0]
+        pred = parts[1]
+        dst = parts[2]
+
+        # Garder uniquement les liens wikiPageWikiLink
+        if pred != WIKILINK_PREDICATE:
+            return None
+
+        # enlever < >
+        src = src[1:-1]
+        dst = dst[1:-1]
+
         return (src, dst)
 
     rdd = rdd.map(parse_line).filter(lambda x: x is not None)
 
-    # Échantillonnage pour 10% du dataset
+    # Échantillonnage (10% du dataset par ex.)
     if 0 < sample_ratio < 1:
         rdd = rdd.sample(False, sample_ratio, seed=42)
 
@@ -79,7 +94,8 @@ def main(input_path, sample_ratio=1.0):
     # 1) Lire TTL
     edges = read_ttl(sc, input_path, sample_ratio)
 
-    print("Nombre total d'edges :", edges.count())
+    num_edges = edges.count()
+    print("Nombre total d'edges :", num_edges)
 
     # 2) Liste d'adjacence
     links = edges.groupByKey().mapValues(list).cache()
@@ -89,8 +105,9 @@ def main(input_path, sample_ratio=1.0):
     links = links.partitionBy(num_partitions).cache()
 
     # 4) Pages uniques
-    pages = edges.flatMap(lambda e: [e[0], e[1]]).distinct()
-    print("Nombre de pages uniques :", pages.count(), "\n")
+    pages = edges.flatMap(lambda e: [e[0], e[1]]).distinct().cache()
+    num_pages = pages.count()
+    print("Nombre de pages uniques :", num_pages, "\n")
 
     # 5) Initialisation des ranks
     ranks = (
@@ -98,6 +115,9 @@ def main(input_path, sample_ratio=1.0):
              .partitionBy(num_partitions)
              .cache()
     )
+
+    # terme de base de PageRank (téléportation uniforme)
+    base = (1.0 - DAMPING) / num_pages
 
     print("\n===== Début du calcul PageRank (RDD) =====\n")
 
@@ -123,7 +143,7 @@ def main(input_path, sample_ratio=1.0):
 
         ranks = (
             contribs.reduceByKey(add)
-                    .mapValues(lambda s: (1 - DAMPING) + DAMPING * s)
+                    .mapValues(lambda s: base + DAMPING * s)
                     .partitionBy(num_partitions)
                     .cache()
         )
@@ -131,7 +151,6 @@ def main(input_path, sample_ratio=1.0):
         iter_end = time.time()
         print(f"Temps de l'itération {i+1} : {iter_end - iter_start:.3f} secondes")
 
-        # Affichage top 5
         top = ranks.takeOrdered(5, key=lambda x: -x[1])
         pretty_print(f"Top 5 pages à l'itération {i+1}", top, limit=5)
 
