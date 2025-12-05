@@ -1,145 +1,157 @@
 from pyspark.sql import SparkSession
 from operator import add
-import sys
 import time
+import sys
 
+# ==========================================
+# CONFIGURATION
+# ==========================================
 DAMPING = 0.85
 ITERATIONS = 10
+NUM_PARTITIONS = 4  # Adapté pour 2 cores (2 à 4 partitions)
 
+def main(input_path):
+    # 1. Init Spark
+    spark = SparkSession.builder \
+        .appName("PageRank-NSDI-Visual") \
+        .getOrCreate()
+    sc = spark.sparkContext
+    sc.setLogLevel("ERROR") # Pour moins de bruit dans la console
 
-# ===============================
-# 1. Lecture TTL (simple sample)
-# ===============================
-def read_ttl(sc, input_path):
-    rdd = sc.textFile(input_path)
+    print(f"Lecture des données depuis : {input_path}")
 
-    def parse(line):
+    # 2. Parsing (Format TTL : <src> <predicate> <dst> .)
+    def parse_ttl(line):
         parts = line.split(" ")
-        if len(parts) < 3:
-            return None
-        src = parts[0][1:-1]
-        dst = parts[2][1:-1]
+        if len(parts) < 3: return None
+        # On nettoie les chevrons < >
+        src = parts[0].strip('<>') 
+        dst = parts[2].strip('<>')
         return (src, dst)
 
-    return rdd.map(lambda l: l.strip()) \
-              .filter(lambda l: len(l) > 0) \
-              .map(parse) \
-              .filter(lambda x: x is not None)
+    lines = sc.textFile(input_path, minPartitions=NUM_PARTITIONS)
+    edges = lines.map(parse_ttl).filter(lambda x: x is not None)
 
+    # 3. Optimisation NSDI : Création de la structure statique (Links)
+    # partitionBy est LA clé pour éviter le shuffle répété
+    links = edges.distinct().groupByKey().partitionBy(NUM_PARTITIONS).cache()
+    
+    # Force le calcul pour mettre en cache et compter les noeuds
+    N = links.count()
+    print(f"Nombre de pages uniques (N) : {N}")
 
-# ===============================
-# 2. Display Helper
-# ===============================
-def pretty(title, rows):
-    print("\n" + "=" * 70)
-    print(title)
-    print("=" * 70)
-    if not rows:
-        print("(vide)")
-        return
-    col = max(len(r[0]) for r in rows)
-    for page, rank in rows:
-        print(f"{page:<{col}}  |  {rank:.6f}")
-    print("=" * 70)
+    # 4. Initialisation des Ranks
+    # mapValues préserve le partitionneur de 'links' -> Ranks et Links sont alignés
+    ranks = links.mapValues(lambda _: 1.0)
 
-
-# ===============================
-# 3. MAIN PAGERANK (RDD NSDI)
-# ===============================
-def main(path):
-
-    spark = SparkSession.builder.appName("PageRank-RDD-NSDI").getOrCreate()
-    sc = spark.sparkContext
-    sc.setLogLevel("WARN")
-
-    print("\nLecture :", path)
-    edges = read_ttl(sc, path).cache()
-    print("Edges :", edges.count())
-
-    # Ensemble des pages
-    pages = edges.flatMap(lambda e: [e[0], e[1]]).distinct().cache()
-    N = pages.count()
-    print("Pages :", N)
-
-    # ============================
-    #  A. Construire adjacency list
-    # ============================
-    raw_links = edges.groupByKey().mapValues(list)
-
-    # Tous les noeuds doivent exister (même degree=0)
-    links = (
-        pages.map(lambda p: (p, []))
-             .leftOuterJoin(raw_links)
-             .mapValues(lambda x: x[1] if x[1] else [])
-             .cache()
-    )
-
-    # ============================
-    #  B. Fixer partitionnement
-    # ============================
-    PARTS = links.getNumPartitions()
-    links = links.partitionBy(PARTS).cache()
-
-    # Initialiser ranks SUR LE MÊME partitionneur
-    ranks = links.mapValues(lambda _: 1.0).cache()
-
-    # Degrés sortants (fixe)
-    out_deg = links.mapValues(len).cache()
-
-    # Nœuds sans sorties (dangling)
-    dangling_nodes = out_deg.filter(lambda x: x[1] == 0).map(lambda x: x[0]).cache()
-
-    base = (1 - DAMPING) / N
-
-    print("\n===== Début PageRank NSDI =====\n")
+    print("\n" + "="*80)
+    print(f"{'DÉBUT DU CALCUL PAGERANK':^80}")
+    print("="*80 + "\n")
 
     global_start = time.time()
 
+    # ==========================================
+    # BOUCLE D'ITÉRATIONS
+    # ==========================================
     for i in range(ITERATIONS):
         iter_start = time.time()
 
-        # Rank total des dangling nodes
-        dangling_rank = ranks.join(dangling_nodes.map(lambda x: (x, None))) \
-                             .map(lambda x: x[1][0]) \
-                             .sum()
-
-        # Contributions
-        contribs = (
-            links.join(ranks)  # local join → pas de shuffle
-                 .flatMap(lambda x:
-                    [(dst, x[1][1] / len(x[1][0])) for dst in x[1][0]]  # distribute rank
-                 )
+        # A. Calcul des contributions (Local Join grâce au partitionnement)
+        contribs = links.join(ranks).flatMap(
+            lambda x: compute_contribs(x[1][0], x[1][1])
         )
 
-        # Nouveau ranks
-        ranks = (
-            contribs.reduceByKey(add)
-                    .mapValues(lambda s: base + DAMPING * (s + dangling_rank / N))
-                    .partitionBy(PARTS)
-                    .cache()
+        # B. Somme des contributions reçues
+        contribs_sum = contribs.reduceByKey(add)
+
+        # C. Calcul de la masse perdue (Dangling Nodes)
+        # Somme actuelle des ranks. Ce qui manque pour arriver à N est perdu.
+        current_mass = ranks.values().sum()
+        dangling_mass = N - current_mass
+
+        # D. Mise à jour des ranks (Full Join pour ne perdre personne)
+        # On utilise links comme base pour garder tous les noeuds
+        ranks = links.leftOuterJoin(contribs_sum).mapValues(
+            lambda x: update_rank(x[1], dangling_mass, N)
         )
+        
+        # E. ACTION & AFFICHAGE
+        # On récupère le Top 5 pour l'afficher
+        # Cela force aussi le calcul de l'itération (Action)
+        top_5 = ranks.takeOrdered(5, key=lambda x: -x[1])
+        
+        iter_duration = time.time() - iter_start
+        
+        # Affichage du tableau pour cette itération
+        print_iteration_table(i + 1, iter_duration, top_5)
 
-        iter_end = time.time()
+    total_time = time.time() - global_start
 
-        print(f"Iteration {i+1} terminée en {iter_end - iter_start:.3f} sec.")
-
-        top5 = ranks.takeOrdered(5, key=lambda x: -x[1])
-        pretty(f"Top 5 - iteration {i+1}", top5)
-
-    global_end = time.time()
-
-    print("\n===== FIN DU CALCUL =====")
-    print(f"Temps total (1 → 10) : {global_end - global_start:.3f} sec")
-    print("==========================")
-
-    top10 = ranks.takeOrdered(10, key=lambda x: -x[1])
-    pretty("TOP 10 FINAL", top10)
+    # ==========================================
+    # RÉSULTAT FINAL
+    # ==========================================
+    print("\n" + "="*80)
+    print(f"{'CALCUL TERMINÉ':^80}")
+    print("="*80)
+    print(f"Temps Total : {total_time:.2f} secondes")
+    
+    # Récupérer le Top 10 final
+    final_top_10 = ranks.takeOrdered(10, key=lambda x: -x[1])
+    print_final_table(final_top_10)
 
     spark.stop()
 
+# ==========================================
+# FONCTIONS LOGIQUES
+# ==========================================
+def compute_contribs(urls, rank):
+    """Distribue le rank aux voisins."""
+    num_urls = len(urls)
+    if num_urls > 0:
+        val = rank / num_urls
+        for url in urls:
+            yield (url, val)
+
+def update_rank(sum_contribs, dangling_mass, N):
+    """Formule PageRank avec redistribution de la masse perdue."""
+    s = sum_contribs if sum_contribs is not None else 0.0
+    # Formule standard: 0.15 + 0.85 * (Contribution + Redistribution)
+    return 0.15 + 0.85 * (s + dangling_mass / N)
+
+# ==========================================
+# FONCTIONS D'AFFICHAGE (TABLEAUX)
+# ==========================================
+def print_iteration_table(iteration, duration, rows):
+    print(f"\n>>> ITÉRATION {iteration} (Durée : {duration:.3f}s)")
+    print("-" * 85)
+    # En-tête du tableau
+    print(f"| {'#':<3} | {'Page URL (Top 5)':<60} | {'Score':>12} |")
+    print("-" * 85)
+    
+    for idx, (url, score) in enumerate(rows, 1):
+        # On tronque l'URL si elle est trop longue pour l'affichage
+        display_url = (url[:57] + '..') if len(url) > 59 else url
+        print(f"| {idx:<3} | {display_url:<60} | {score:12.6f} |")
+    
+    print("-" * 85)
+
+def print_final_table(rows):
+    print("\n")
+    print("+" + "="*78 + "+")
+    print(f"|{'TOP 10 RESULTATS FINAUX':^78}|")
+    print("+" + "="*78 + "+")
+    print(f"| {'#':<3} | {'Page URL':<55} | {'Final Score':>12} |")
+    print("|" + "-"*78 + "|")
+    
+    for idx, (url, score) in enumerate(rows, 1):
+        display_url = (url[:52] + '...') if len(url) > 55 else url
+        print(f"| {idx:<3} | {display_url:<55} | {score:12.6f} |")
+    
+    print("+" + "="*78 + "+")
+    print("\n")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: spark-submit pagerank_rdd_ttl.py sample.ttl")
-        sys.exit(1)
-    main(sys.argv[1])
+        print("Usage: python pagerank_table.py <file_path>")
+    else:
+        main(sys.argv[1])
