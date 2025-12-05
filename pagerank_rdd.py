@@ -8,49 +8,17 @@ ITERATIONS = 10
 WIKILINK_PREDICATE = "<http://dbpedia.org/ontology/wikiPageWikiLink>"
 
 
-# ------------------------------------------------------------
-# Fonction utilitaire pour affichage propre en tableau
-# ------------------------------------------------------------
-def pretty_print(title, rows, limit=10):
-    print("\n" + "=" * 80)
-    print(title)
-    print("=" * 80)
-
-    if not rows:
-        print("(Aucune donnée)")
-        print("=" * 80)
-        return
-
-    col1 = max(len(r[0]) for r in rows[:limit])
-    col2 = 20
-
-    print(f"{'src':<{col1}} | {'rank':<{col2}}")
-    print("-" * (col1 + col2 + 3))
-
-    for p, r in rows[:limit]:
-        print(f"{p:<{col1}} | {r:<{col2}.6f}")
-
-    print("=" * 80 + "\n")
-
-
-# ------------------------------------------------------------
-# Lecture du fichier TTL (RDF triples)
-# ------------------------------------------------------------
 def read_ttl(sc, input_path, sample_ratio):
-    # Spark décompresse automatiquement les .bz2
+    """Lit un fichier TTL ou TTL.BZ2 et retourne des edges (src, dst)."""
+
     rdd = sc.textFile(input_path)
 
-    # Nettoyage des lignes vides / commentaires
-    rdd = (
-        rdd.map(lambda line: line.strip())
-           .filter(lambda line: len(line) > 0 and not line.startswith("#"))
-    )
+    # Nettoyage des lignes
+    rdd = rdd.map(lambda l: l.strip()) \
+             .filter(lambda l: len(l) > 0 and not l.startswith("#"))
 
-    # Format DBpedia :
-    # <src> <predicate> <dst> .
     def parse_line(line):
         parts = line.split(" ")
-        # On attend au moins : src, pred, dst, "."
         if len(parts) < 4:
             return None
 
@@ -58,29 +26,44 @@ def read_ttl(sc, input_path, sample_ratio):
         pred = parts[1]
         dst = parts[2]
 
-        # Garder uniquement les liens wikiPageWikiLink
         if pred != WIKILINK_PREDICATE:
             return None
 
-        # enlever < >
-        src = src[1:-1]
-        dst = dst[1:-1]
+        return (src[1:-1], dst[1:-1])  # enlever < >
 
-        return (src, dst)
-
+    # Filtrer uniquement edges valides
     rdd = rdd.map(parse_line).filter(lambda x: x is not None)
 
-    # Échantillonnage (10% du dataset par ex.)
+    # Échantillonnage demandé par le prof (ex: 0.1 = 10%)
     if 0 < sample_ratio < 1:
         rdd = rdd.sample(False, sample_ratio, seed=42)
 
     return rdd.distinct().cache()
 
 
-# ------------------------------------------------------------
-# Programme principal PageRank RDD compatible TTL
-# ------------------------------------------------------------
+def pretty_print(title, rows, limit=10):
+    print("\n" + "=" * 80)
+    print(title)
+    print("=" * 80)
+    if not rows:
+        print("(vide)")
+        print("=" * 80)
+        return
+
+    col1 = max(len(r[0]) for r in rows[:limit])
+    col2 = 20
+
+    print(f"{'Page':<{col1}} | Rank")
+    print("-" * (col1 + col2 + 3))
+
+    for p, r in rows[:limit]:
+        print(f"{p:<{col1}} | {r}")
+
+    print("=" * 80 + "\n")
+
+
 def main(input_path, sample_ratio=1.0):
+
     spark = SparkSession.builder \
         .appName("PageRank-RDD-TTL") \
         .getOrCreate()
@@ -89,95 +72,80 @@ def main(input_path, sample_ratio=1.0):
     sc.setLogLevel("WARN")
 
     print("\nLecture du fichier :", input_path)
-    print("Sample ratio (10% = 0.1) :", sample_ratio, "\n")
+    print("Sample ratio :", sample_ratio)
 
-    # 1) Lire TTL
     edges = read_ttl(sc, input_path, sample_ratio)
+    print("Nombre d'edges :", edges.count())
 
-    num_edges = edges.count()
-    print("Nombre total d'edges :", num_edges)
-
-    # 2) Liste d'adjacence
+    # Adjacency list
     links = edges.groupByKey().mapValues(list).cache()
 
-    # 3) Partitionnement
-    num_partitions = links.getNumPartitions()
-    links = links.partitionBy(num_partitions).cache()
-
-    # 4) Pages uniques
+    # Pages uniques
     pages = edges.flatMap(lambda e: [e[0], e[1]]).distinct().cache()
     num_pages = pages.count()
-    print("Nombre de pages uniques :", num_pages, "\n")
+    print("Nombre de pages uniques :", num_pages)
 
-    # 5) Initialisation des ranks
-    ranks = (
-        pages.map(lambda p: (p, 1.0))
-             .partitionBy(num_partitions)
-             .cache()
-    )
+    # Initialisation des ranks
+    ranks = pages.map(lambda p: (p, 1.0)).cache()
 
-    # terme de base de PageRank (téléportation uniforme)
-    base = (1.0 - DAMPING) / num_pages
+    # Teleportation uniforme
+    base = (1 - DAMPING) / num_pages
 
-    print("\n===== Début du calcul PageRank (RDD) =====\n")
+    # Eviter les shuffles : même partitionnement
+    num_partitions = links.getNumPartitions()
+    links = links.partitionBy(num_partitions).cache()
+    ranks = ranks.partitionBy(num_partitions).cache()
 
-    start_time = time.time()
+    print("\n===== Début du PageRank RDD =====\n")
 
-    # ------------------------------------------------------------
-    # Boucle PageRank
-    # ------------------------------------------------------------
     for i in range(ITERATIONS):
+        print(f"Itération {i+1}/{ITERATIONS}")
         iter_start = time.time()
 
-        print(f"Itération {i+1}/{ITERATIONS}")
+        # JOIN : aucune redistribution => évite les shuffles
+        joined = links.join(ranks)
 
-        contribs = (
-            links.join(ranks)
-                 .flatMap(
-                    lambda pr: [
-                        (dst, pr[1][1] / len(pr[1][0]))
-                        for dst in pr[1][0]
-                    ]
-                 )
+        # Contributions sortantes
+        contribs = joined.flatMap(
+            lambda x: [
+                (dst, x[1][1] / len(x[1][0]))
+                for dst in x[1][0]
+            ]
         )
 
+        # Détection des dangling nodes (pages sans liens sortants)
+        out_degrees = links.mapValues(len)
+        dangling_rank = (
+            ranks.join(out_degrees)
+                 .filter(lambda x: x[1][1] == 0)
+                 .map(lambda x: x[1][0])
+                 .sum()
+        )
+
+        # Mise à jour du PageRank
         ranks = (
             contribs.reduceByKey(add)
-                    .mapValues(lambda s: base + DAMPING * s)
+                    .mapValues(lambda s: base + DAMPING * (s + dangling_rank / num_pages))
                     .partitionBy(num_partitions)
                     .cache()
         )
 
         iter_end = time.time()
-        print(f"Temps de l'itération {i+1} : {iter_end - iter_start:.3f} secondes")
+        print(f"Temps iteration {i+1} : {iter_end - iter_start:.3f}s")
 
-        top = ranks.takeOrdered(5, key=lambda x: -x[1])
-        pretty_print(f"Top 5 pages à l'itération {i+1}", top, limit=5)
-
-    end_time = time.time()
-
-    print("=" * 80)
-    print(f"Temps total d'exécution PageRank : {end_time - start_time:.3f} secondes")
-    print("=" * 80)
+        top5 = ranks.takeOrdered(5, key=lambda x: -x[1])
+        pretty_print(f"Top 5 après itération {i+1}", top5)
 
     # Résultats finaux
     top20 = ranks.takeOrdered(20, key=lambda x: -x[1])
-    pretty_print(
-        "RÉSULTATS FINAUX (Top 20 pages triées par score descendant)",
-        top20,
-        limit=20
-    )
+    pretty_print("TOP 20 FINAL", top20)
 
-    print("Fin — PageRank RDD exécuté correctement.\n")
     spark.stop()
 
 
-# ------------------------------------------------------------
-# Point d'entrée
-# ------------------------------------------------------------
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: spark-submit pagerank_rdd_ttl.py <file.ttl or file.ttl.bz2> [sample_ratio]")
+        print("Usage: spark-submit pagerank_rdd_ttl.py <file.ttl(.bz2)> [sample_ratio]")
         sys.exit(1)
 
     input_path = sys.argv[1]
