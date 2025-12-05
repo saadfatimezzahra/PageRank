@@ -1,0 +1,14 @@
+# Large datasets
+edges.csv
+edges/*
+*.bz2
+*.ttl
+*.csv
+!small_edges.csv     # autorise uniquement le petit fichier de test
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Spark output
+output/
