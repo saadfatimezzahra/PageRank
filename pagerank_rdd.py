@@ -101,10 +101,10 @@ def main(input_path, sample_ratio=1.0):
                     .cache()
         )
 
-        # Afficher début + fin uniquement
-        if i < 2 or i == ITERATIONS - 1:
-            top = ranks.takeOrdered(5, key=lambda x: -x[1])
-            pretty_print(f"Top 5 pages à l'itération {i+1}", top, limit=5)
+        # Afficher tout
+        
+        top = ranks.takeOrdered(5, key=lambda x: -x[1])
+        pretty_print(f"Top 5 pages à l'itération {i+1}", top, limit=5)
 
     # Résultats finaux
     top20 = ranks.takeOrdered(20, key=lambda x: -x[1])
