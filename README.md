@@ -86,4 +86,21 @@ Temps TOTAL PageRank : 183.400 sec
 | 10  | http://dbpedia.org/resource/Category:Discoveries_by_LINEAR                                 |   107.232030 |
 ===================================================================================================================
 
+Resultats DF(6noeuds):
+Temps Total : 230.04s
+
+
+http://dbpedia.org/resource/Category:Background_asteroids,820.2171008874814
+http://dbpedia.org/resource/Category:Named_minor_planets,776.5598654343432
+http://dbpedia.org/resource/Table_of_years_in_literature,288.7634249283426
+http://dbpedia.org/resource/List_of_years_in_science,288.7634249283426
+http://dbpedia.org/resource/1000_(number),268.35265207476107
+http://dbpedia.org/resource/Category:Discoveries_by_SCAP,201.98237486335177
+http://dbpedia.org/resource/List_of_minor_planets:_10001–11000,188.56687145596825
+http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998,173.89589710326064
+http://dbpedia.org/resource/American_football,154.34466091426026
+http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees,148.325433610979
+
+
+
 
