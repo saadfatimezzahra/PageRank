@@ -9,10 +9,8 @@ import sys
 # ==========================================
 DAMPING = 0.85
 ITERATIONS = 10
-# Nombre de partitions pour le shuffle (ajuster selon ta machine, 4 pour 2 cores c'est bien)
-NUM_PARTITIONS = 4 
 
-def main(input_path):
+def main(input_path, num_partitions, output):
     spark = SparkSession.builder \
         .appName("PageRank-DataFrame") \
         .config("spark.cleaner.referenceTracking.cleanCheckpoints", "true") \
@@ -42,7 +40,7 @@ def main(input_path):
     # Contrairement aux RDD, on garde souvent le format tabulaire (Edge List) pour les joins
     
     # On met en cache les arêtes car elles servent à chaque tour
-    edges = edges.repartition(NUM_PARTITIONS).cache()
+    edges = edges.repartition(num_partitions).cache()
     
     # Calcul des degrés sortants (OutDegree) pour chaque source
     # Utile pour diviser le rank par le nombre de voisins
@@ -51,7 +49,7 @@ def main(input_path):
     # Univers complet des pages (src + dst) pour ne perdre personne
     # C'est crucial pour réintégrer les pages qui ne font que recevoir (sinks)
     all_nodes = edges.select("src").union(edges.select("dst")).distinct().withColumnRenamed("src", "id")
-    all_nodes = all_nodes.repartition(NUM_PARTITIONS).cache()
+    all_nodes = all_nodes.repartition(num_partitions).cache()
     
     N = all_nodes.count()
     print(f"Nombre total de pages (N) : {N}")
@@ -66,8 +64,7 @@ def main(input_path):
     global_start = time.time()
 
     for i in range(ITERATIONS):
-        iter_start = time.time()
-
+        print(f"\n--- Itération {i+1} ---")
         # --- A. Préparation des contributions ---
         # On joint les ranks actuels avec les edges pour savoir qui donne combien à qui.
         # Mais d'abord, on joint edges avec out_degrees pour avoir le diviseur.
@@ -121,50 +118,26 @@ def main(input_path):
         # Sans ça, Spark plante après quelques itérations complexes.
         # localCheckpoint coupe le plan d'exécution et stocke les données sur le disque local des exécuteurs.
         # Si localCheckpoint plante (manque d'espace), utiliser .cache() + .count()
-        ranks = new_ranks.localCheckpoint() 
-        
-        # Action pour forcer le calcul immédiat
-        # On récupère le top 5 pour l'affichage
-        top5 = ranks.orderBy(F.col("rank").desc()).limit(5).collect()
-        
-        dt = time.time() - iter_start
-        print_iter(i+1, dt, top5)
+        ranks = new_ranks.localCheckpoint()
+    
 
+    path = spark.sparkContext._jvm.org.apache.hadoop.fs.Path(output)
+    fs = path.getFileSystem(spark._jsc.hadoopConfiguration())
+    if fs.exists(path):
+        fs.delete(path, True)
+    
+    # Affichage final Top 10
+    ranks.orderBy(F.col("rank").desc()).limit(10).coalesce(1).write.csv(output, header=True)
     total_time = time.time() - global_start
     print(f"\nTemps Total : {total_time:.2f}s")
-
-    # Affichage final Top 10
-    top10 = ranks.orderBy(F.col("rank").desc()).limit(10).collect()
-    print_final(top10)
     
-    spark.stop()
 
 # ================= AFFICHAGE (Même logique que RDD) =================
-
-def print_iter(i, dt, rows):
-    print(f"\n> Iter {i} ({dt:.2f}s)")
-    print("-" * 120)
-    print(f"| {'#':<3} | {'Page URL':<90} | {'Rank':>12} |")
-    print("-" * 120)
-    for idx, row in enumerate(rows, 1):
-        url = row['id']
-        r = row['rank']
-        print(f"| {idx:<3} | {url:<90} | {r:12.6f} |")
-
-def print_final(rows):
-    print("\n" + "="*120)
-    print(f"{'RESULTATS FINAUX':^120}")
-    print("="*120)
-    print(f"| {'#':<3} | {'Page URL':<90} | {'Rank':>12} |")
-    print("-" * 120)
-    for idx, row in enumerate(rows, 1):
-        url = row['id']
-        r = row['rank']
-        print(f"| {idx:<3} | {url:<90} | {r:12.6f} |")
-    print("="*120 + "\n")
-
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python pagerank_df.py data.ttl")
+    if len(sys.argv) < 4:
+        print("Usage: python pagerank_df.py <data file> <num partitions> <output_path>")
     else:
-        main(sys.argv[1])
+        filepath = sys.argv[1] # string
+        num_partitions = int(sys.argv[2]) # Regle: 2 a 4 x nombre de coeurs de la machine
+        output = sys.argv[3]
+        main(filepath, num_partitions, output)
