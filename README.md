@@ -7,3 +7,21 @@ Cette version utilise les RDD de Spark, ce qui permet de contrôler directement 
 # Implementation DF
 
 Cette version utilise l’API DataFrame de Spark, qui est plus haut niveau et profite automatiquement des optimisations du moteur Spark. Les données sont nettoyées avec des fonctions SQL, ce qui rend le traitement plus rapide. À chaque itération du PageRank, localCheckpoint() est utilisé pour réduire la taille du plan d’exécution et éviter les problèmes de mémoire. L’algorithme conserve toutes les pages du graphe grâce à un left_outer_join, même celles qui n’ont aucun lien sortant. Grâce à Catalyst, Spark optimise la plupart des opérations et rend cette version plus simple à écrire et souvent plus rapide à exécuter.
+
+Resultat DF (2Noeuds):
+
+Temps Total : 210.26s
+
+gcloud storage cat gs://$BUCKET/output/part-00000-4ff317f2-0ed5-4780-8d80-47c001d88bbd-c000.csv
+id,rank
+http://dbpedia.org/resource/Category:Background_asteroids,820.2171008874903
+http://dbpedia.org/resource/Category:Named_minor_planets,776.5598654343554
+http://dbpedia.org/resource/List_of_years_in_science,288.76342492834783
+http://dbpedia.org/resource/Table_of_years_in_literature,288.76342492834783
+http://dbpedia.org/resource/1000_(number),268.35265207476596
+http://dbpedia.org/resource/Category:Discoveries_by_SCAP,201.98237486335663
+http://dbpedia.org/resource/List_of_minor_planets:_10001–11000,188.5668714559716
+http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998,173.89589710326348
+http://dbpedia.org/resource/American_football,154.34466091426665
+http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees,148.325433610981
+
