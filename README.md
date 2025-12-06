@@ -65,3 +65,25 @@ http://dbpedia.org/resource/American_football,154.3446609142612
 http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees,148.3254336109792
 
 
+Resultats RDD(4noeuds):
+Temps TOTAL PageRank : 183.400 sec
+
+
+========================================================================================================================
+                                                RESULTATS FINAUX TOP 10                                                 
+========================================================================================================================
+| #   | Page URL                                                                                   |         Rank |
+------------------------------------------------------------------------------------------------------------------------
+| 1   | http://dbpedia.org/resource/Category:Background_asteroids                                  |   659.399772 |
+| 2   | http://dbpedia.org/resource/Category:Named_minor_planets                                   |   623.441737 |
+| 3   | http://dbpedia.org/resource/Table_of_years_in_literature                                   |   232.507412 |
+| 4   | http://dbpedia.org/resource/List_of_years_in_science                                       |   232.507412 |
+| 5   | http://dbpedia.org/resource/1000_(number)                                                  |   215.491269 |
+| 6   | http://dbpedia.org/resource/Category:Discoveries_by_SCAP                                   |   162.624421 |
+| 7   | http://dbpedia.org/resource/List_of_minor_planets:_10001–11000                             |   151.815228 |
+| 8   | http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998               |   139.979088 |
+| 9   | http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees            |   119.429123 |
+| 10  | http://dbpedia.org/resource/Category:Discoveries_by_LINEAR                                 |   107.232030 |
+===================================================================================================================
+
+
