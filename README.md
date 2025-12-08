@@ -1,8 +1,8 @@
 # PageRank Tests sur Wikipedia
 
-**Projet:** page-rank-479014  
+**Projet:** pagerank-480311  
 **Dataset:** DBpedia WikiLinks (180M+ triples, 11GB non compressé)  
-**Date des tests:** 8 décembre 2025  
+**Date des tests:** 5 décembre 2025  
 **Région GCP:** europe-west1
 
 ---
@@ -218,7 +218,6 @@ gcloud dataproc clusters create pagerank-cluster-nX \
 
 ---
 
-**Généré le:** 8 décembre 2025  
-**Équipe:** PageRank Project  
-**Projet GCP:** page-rank-479014
+**Équipe:** OUEDRHIRI Mohammed / SAAD Fatimezzahra  
+**Projet GCP:** pagerank-480311
 
