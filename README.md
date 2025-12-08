@@ -92,33 +92,33 @@ L’objectif est d’évaluer leurs performances et leur comportement sur plusie
 ## 4. Scalabilité
 ### 4.1 RDD
 #### n=2 → n=4
-| Speedup | Efficacité |
+| Accélération | Efficacité |
 |---------|------------|
 | 1.92x   | 96%        |
 
 #### n=4 → n=6
-| Speedup | Efficacité |
+| Accélération | Efficacité |
 |---------|------------|
 | 1.40x   | 93%        |
 
 #### n=2 → n=6
-| Speedup | Efficacité |
+| Accélération | Efficacité |
 |---------|------------|
 | 2.69x   | 90%        |
 
 ### 4.2 DataFrame
 #### n=2 → n=4
-| Speedup | Efficacité |
+| Accélération | Efficacité |
 |---------|------------|
 | 1.56x   | 78%        |
 
 #### n=4 → n=6
-| Speedup | Efficacité |
+| Accélération | Efficacité |
 |---------|------------|
 | 1.42x   | 95%        |
 
 #### n=2 → n=6
-| Speedup | Efficacité |
+| Accélération | Efficacité |
 |---------|------------|
 | 2.23x   | 74%        |
 
@@ -209,8 +209,8 @@ gcloud dataproc clusters create pagerank-cluster-nX \
 ```
 
 ### Scripts Python
-- `pagerank_rdd.py` : RDD Spark, transformations manuelles, bas niveau
-- `pagerank_df.py` : DataFrame Spark, optimisations Catalyst, AQE, Tungsten engine
+- `pagerank_rdd.py` : implémentation PageRank utilisant les RDD pour un contrôle direct sur les transformations et le partitionnement.
+- `pagerank_df.py` : implémentation PageRank basée sur DataFrame, tirant parti des optimisations automatiques du moteur Catalyst.
 
 ---
 
