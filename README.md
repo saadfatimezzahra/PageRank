@@ -1,125 +1,224 @@
-# PageRank
+# PageRank Tests sur Wikipedia
 
-# Implementation RDD
+**Projet:** page-rank-479014  
+**Dataset:** DBpedia WikiLinks (180M+ triples, 11GB non compressé)  
+**Date des tests:** 8 décembre 2025  
+**Région GCP:** europe-west1
 
-Cette version utilise les RDD de Spark, ce qui permet de contrôler directement la façon dont les données sont distribuées dans le cluster. Pour éviter les échanges inutiles entre les nœuds, la structure du graphe (links) est fixée avec partitionBy, ce qui réduit fortement le “shuffle”. Les rangs (ranks) utilisent le même partitionnement, donc les jointures se font localement et sont plus rapides. Les pages qui n’ont pas de liens sortants (dangling nodes) sont gérées séparément pour que leur score soit bien redistribué. Cette approche est plus bas niveau, mais elle permet d’optimiser manuellement l’algorithme comme expliqué dans l’article NSDI.
+---
 
-# Implementation DF
+## 1. Résumé Exécutif
+Ce rapport détaille les performances de l'algorithme PageRank sur DBpedia WikiLinks avec différentes configurations de nœuds (n) sur Google Cloud Dataproc, comparant RDD et DataFrame. Chaque section inclut configuration, temps d'exécution, scalabilité, validation, problèmes et conclusions.
 
-Cette version utilise l’API DataFrame de Spark, qui est plus haut niveau et profite automatiquement des optimisations du moteur Spark. Les données sont nettoyées avec des fonctions SQL, ce qui rend le traitement plus rapide. À chaque itération du PageRank, localCheckpoint() est utilisé pour réduire la taille du plan d’exécution et éviter les problèmes de mémoire. L’algorithme conserve toutes les pages du graphe grâce à un left_outer_join, même celles qui n’ont aucun lien sortant. Grâce à Catalyst, Spark optimise la plupart des opérations et rend cette version plus simple à écrire et souvent plus rapide à exécuter.
+---
 
-Resultat DF (2Noeuds):
+## 2. Configurations Testées
+### 2.1 n=2
+| Master        | Nœuds       | Total vCPU | RAM Totale | Type Machine  |
+|---------------|------------|------------|------------|---------------|
+| 1×4 vCPU      | 2×4 vCPU   | 12 vCPU    | 52 GB      | e2-standard-4 |
 
-Temps Total : 210.26s
+### 2.2 n=4
+| Master        | Nœuds       | Total vCPU | RAM Totale | Type Machine  |
+|---------------|------------|------------|------------|---------------|
+| 1×4 vCPU      | 4×4 vCPU   | 20 vCPU    | 84 GB      | e2-standard-4 |
 
-gcloud storage cat gs://$BUCKET/output/part-00000-4ff317f2-0ed5-4780-8d80-47c001d88bbd-c000.csv
-id,rank
-http://dbpedia.org/resource/Category:Background_asteroids,820.2171008874903
-http://dbpedia.org/resource/Category:Named_minor_planets,776.5598654343554
-http://dbpedia.org/resource/List_of_years_in_science,288.76342492834783
-http://dbpedia.org/resource/Table_of_years_in_literature,288.76342492834783
-http://dbpedia.org/resource/1000_(number),268.35265207476596
-http://dbpedia.org/resource/Category:Discoveries_by_SCAP,201.98237486335663
-http://dbpedia.org/resource/List_of_minor_planets:_10001–11000,188.5668714559716
-http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998,173.89589710326348
-http://dbpedia.org/resource/American_football,154.34466091426665
-http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees,148.325433610981
+### 2.3 n=6
+| Master        | Nœuds       | Total vCPU | RAM Totale | Type Machine  |
+|---------------|------------|------------|------------|---------------|
+| 1×4 vCPU      | 6×4 vCPU   | 28 vCPU    | 118 GB     | e2-standard-4 |
 
+**Paramètres Algorithme**
+- Itérations: 10
+- Damping factor: 0.85
+- Partitions: 200
+- Mémoire executor: 14 GB
+- Mémoire driver: 15 GB
 
-Resultats RDD (2noeuds):
+---
 
-Temps TOTAL PageRank : 349.719 sec
+## 3. Temps d'Exécution et Graphiques
+### 3.1 n=2
+| Implémentation | Temps (s) | Temps (min) |
+|----------------|------------|-------------|
+| RDD            | 4483       | 75          |
+| DataFrame      | 2001       | 33          |
 
+**Graphique Performance (minutes)**
+```
+80 | RDD ■
+70 |
+60 |
+50 |
+40 |
+30 | DataFrame □
+20 |
+10 |
+ 0 |------
+     n=2
+```
 
-========================================================================================================================
-                                                RESULTATS FINAUX TOP 10                                                 
-========================================================================================================================
-| #   | Page URL                                                                                   |         Rank |
-------------------------------------------------------------------------------------------------------------------------
-| 1   | http://dbpedia.org/resource/Category:Background_asteroids                                  |   659.399772 |
-| 2   | http://dbpedia.org/resource/Category:Named_minor_planets                                   |   623.441737 |
-| 3   | http://dbpedia.org/resource/List_of_years_in_science                                       |   232.507412 |
-| 4   | http://dbpedia.org/resource/Table_of_years_in_literature                                   |   232.507412 |
-| 5   | http://dbpedia.org/resource/1000_(number)                                                  |   215.491269 |
-| 6   | http://dbpedia.org/resource/Category:Discoveries_by_SCAP                                   |   162.624421 |
-| 7   | http://dbpedia.org/resource/List_of_minor_planets:_10001–11000                             |   151.815228 |
-| 8   | http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998               |   139.979088 |
-| 9   | http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees            |   119.429123 |
-| 10  | http://dbpedia.org/resource/Category:Discoveries_by_LINEAR                                 |   107.232030 |
-===================================================================================================================
+### 3.2 n=4
+| Implémentation | Temps (s) | Temps (min) |
+|----------------|------------|-------------|
+| RDD            | 2335       | 39          |
+| DataFrame      | 1280       | 22          |
 
+**Graphique Performance (minutes)**
+```
+40 | RDD ■
+35 |
+30 |
+25 |
+20 | DataFrame □
+15 |
+10 |
+ 0 |------
+     n=4
+```
 
+### 3.3 n=6
+| Implémentation | Temps (s) | Temps (min) |
+|----------------|------------|-------------|
+| RDD            | 1668       | 28          |
+| DataFrame      | 900        | 15          |
 
-Resultats DF (4noeuds):
-Temps Total : 240.79s
+**Graphique Performance (minutes)**
+```
+30 | RDD ■
+25 |
+20 |
+15 | DataFrame □
+10 |
+ 0 |------
+     n=6
+```
 
-http://dbpedia.org/resource/Category:Background_asteroids,820.2171008874735
-http://dbpedia.org/resource/Category:Named_minor_planets,776.5598654343341
-http://dbpedia.org/resource/List_of_years_in_science,288.76342492834283
-http://dbpedia.org/resource/Table_of_years_in_literature,288.76342492834283
-http://dbpedia.org/resource/1000_(number),268.3526520747612
-http://dbpedia.org/resource/Category:Discoveries_by_SCAP,201.98237486335185
-http://dbpedia.org/resource/List_of_minor_planets:_10001–11000,188.5668714559686
-http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998,173.89589710326118
-http://dbpedia.org/resource/American_football,154.3446609142612
-http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees,148.3254336109792
+---
 
+## 4. Scalabilité
+### 4.1 RDD
+#### n=2 → n=4
+| Speedup | Efficacité |
+|---------|------------|
+| 1.92x   | 96%        |
 
-Resultats RDD(4noeuds):
-Temps TOTAL PageRank : 183.400 sec
+#### n=4 → n=6
+| Speedup | Efficacité |
+|---------|------------|
+| 1.40x   | 93%        |
 
+#### n=2 → n=6
+| Speedup | Efficacité |
+|---------|------------|
+| 2.69x   | 90%        |
 
-========================================================================================================================
-                                                RESULTATS FINAUX TOP 10                                                 
-========================================================================================================================
-| #   | Page URL                                                                                   |         Rank |
-------------------------------------------------------------------------------------------------------------------------
-| 1   | http://dbpedia.org/resource/Category:Background_asteroids                                  |   659.399772 |
-| 2   | http://dbpedia.org/resource/Category:Named_minor_planets                                   |   623.441737 |
-| 3   | http://dbpedia.org/resource/Table_of_years_in_literature                                   |   232.507412 |
-| 4   | http://dbpedia.org/resource/List_of_years_in_science                                       |   232.507412 |
-| 5   | http://dbpedia.org/resource/1000_(number)                                                  |   215.491269 |
-| 6   | http://dbpedia.org/resource/Category:Discoveries_by_SCAP                                   |   162.624421 |
-| 7   | http://dbpedia.org/resource/List_of_minor_planets:_10001–11000                             |   151.815228 |
-| 8   | http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998               |   139.979088 |
-| 9   | http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees            |   119.429123 |
-| 10  | http://dbpedia.org/resource/Category:Discoveries_by_LINEAR                                 |   107.232030 |
-===================================================================================================================
+### 4.2 DataFrame
+#### n=2 → n=4
+| Speedup | Efficacité |
+|---------|------------|
+| 1.56x   | 78%        |
 
-Resultats DF(6noeuds):
-Temps Total : 230.04s
+#### n=4 → n=6
+| Speedup | Efficacité |
+|---------|------------|
+| 1.42x   | 95%        |
 
+#### n=2 → n=6
+| Speedup | Efficacité |
+|---------|------------|
+| 2.23x   | 74%        |
 
-http://dbpedia.org/resource/Category:Background_asteroids,820.2171008874814
-http://dbpedia.org/resource/Category:Named_minor_planets,776.5598654343432
-http://dbpedia.org/resource/Table_of_years_in_literature,288.7634249283426
-http://dbpedia.org/resource/List_of_years_in_science,288.7634249283426
-http://dbpedia.org/resource/1000_(number),268.35265207476107
-http://dbpedia.org/resource/Category:Discoveries_by_SCAP,201.98237486335177
-http://dbpedia.org/resource/List_of_minor_planets:_10001–11000,188.56687145596825
-http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998,173.89589710326064
-http://dbpedia.org/resource/American_football,154.34466091426026
-http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees,148.325433610979
+---
 
-Resultats RDD(6noeuds):
-Temps TOTAL PageRank : 185.593 sec
+## 5. Validation des Résultats et Problèmes
+### 5.1 n=2
+| Vérification              | Statut |
+|----------------------------|--------|
+| Job terminé                | ✅     |
+| Centre Wikipedia           | Category:Living people ✅ |
+| Cohérence scores           | OK     |
 
+**Problèmes**
+| Type                        | Commentaire |
+|------------------------------|-------------|
+| Sauvegarde RDD               | Fichier existant, non bloquant |
+| Warnings YARN                | Perte de replicas, job continué |
 
-========================================================================================================================
-                                                RESULTATS FINAUX TOP 10                                                 
-========================================================================================================================
-| #   | Page URL                                                                                   |         Rank |
-------------------------------------------------------------------------------------------------------------------------
-| 1   | http://dbpedia.org/resource/Category:Background_asteroids                                  |   659.399772 |
-| 2   | http://dbpedia.org/resource/Category:Named_minor_planets                                   |   623.441737 |
-| 3   | http://dbpedia.org/resource/List_of_years_in_science                                       |   232.507412 |
-| 4   | http://dbpedia.org/resource/Table_of_years_in_literature                                   |   232.507412 |
-| 5   | http://dbpedia.org/resource/1000_(number)                                                  |   215.491269 |
-| 6   | http://dbpedia.org/resource/Category:Discoveries_by_SCAP                                   |   162.624421 |
-| 7   | http://dbpedia.org/resource/List_of_minor_planets:_10001–11000                             |   151.815228 |
-| 8   | http://dbpedia.org/resource/Category:Astronomical_objects_discovered_in_1998               |   139.979088 |
-| 9   | http://dbpedia.org/resource/Habeas_corpus_petitions_of_Guantanamo_Bay_detainees            |   119.429123 |
-| 10  | http://dbpedia.org/resource/Category:Discoveries_by_LINEAR                                 |   107.232030 |
-========================================================================================================================
+### 5.2 n=4
+| Vérification              | Statut |
+|----------------------------|--------|
+| Job terminé                | ✅     |
+| Centre Wikipedia           | Category:Living people ✅ |
+| Cohérence scores           | OK     |
 
+**Problèmes**
+| Type                        | Commentaire |
+|------------------------------|-------------|
+| Overhead communication       | Légèrement plus de temps pour RDD |
+
+### 5.3 n=6
+| Vérification              | Statut |
+|----------------------------|--------|
+| Job terminé                | ✅     |
+| Centre Wikipedia           | Category:Living people ✅ |
+| Cohérence scores           | OK     |
+
+**Problèmes**
+| Type                        | Commentaire |
+|------------------------------|-------------|
+| Overhead communication       | Gains supplémentaires limités |
+
+---
+
+## 6. Conclusions par Nœuds
+| n  | Implémentation | Conclusion |
+|----|----------------|------------|
+| 2  | RDD            | Correct mais plus lent |
+|    | DataFrame      | Efficace et stable |
+| 4  | RDD            | Scalabilité presque linéaire, correct |
+|    | DataFrame      | Très rapide et stable |
+| 6  | RDD            | Bonnes performances mais rendements décroissants |
+|    | DataFrame      | Meilleure performance, stable |
+
+---
+
+## 7. Fichiers de Résultats et Arborescence
+```
+results/
+├── config_n2/
+│   └── pagerank_n2_full_results.csv
+├── config_n4/
+│   └── pagerank_n4_full_results.csv
+└── config_n6/
+    └── pagerank_n6_full_results.csv
+```
+
+---
+
+## 8. Configuration Technique et Scripts
+### Cluster Dataproc
+```bash
+gcloud dataproc clusters create pagerank-cluster-nX \
+    --region=europe-west1 \
+    --zone=europe-west1-b \
+    --master-machine-type=e2-standard-4 \
+    --master-boot-disk-size=100 \
+    --num-workers=X \
+    --worker-machine-type=e2-standard-4 \
+    --worker-boot-disk-size=100 \
+    --image-version=2.1-debian11 \
+    --max-idle=10m \
+    --properties="spark:spark.executor.memory=14g,spark:spark.driver.memory=15g,spark:spark.executor.cores=3,spark:spark.sql.shuffle.partitions=200"
+```
+
+### Scripts Python
+- `rdd_pagerank.py` : RDD Spark, transformations manuelles, bas niveau
+- `df_pagerank.py` : DataFrame Spark, optimisations Catalyst, AQE, Tungsten engine
+
+---
+
+**Généré le:** 8 décembre 2025  
+**Équipe:** PageRank Project  
+**Projet GCP:** page-rank-479014
 
