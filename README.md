@@ -1,14 +1,10 @@
 # PageRank Tests sur Wikipedia
 
-**Projet:** pagerank-480311  
-**Dataset:** DBpedia WikiLinks (180M+ triples, 11GB non compressé)  
-**Date des tests:** 5 décembre 2025  
-**Région GCP:** europe-west1
-
 ---
 
-## 1. Résumé Exécutif
-Ce rapport détaille les performances de l'algorithme PageRank sur DBpedia WikiLinks avec différentes configurations de nœuds (n) sur Google Cloud Dataproc, comparant RDD et DataFrame. Chaque section inclut configuration, temps d'exécution, scalabilité, validation, problèmes et conclusions.
+## 1. Introduction
+Ce document présente les résultats de notre étude sur l’algorithme PageRank appliqué au dataset DBpedia WikiLinks. Deux implémentations ont été développées : une version RDD et une version DataFrame.
+L’objectif est d’évaluer leurs performances et leur comportement sur plusieurs configurations de clusters Dataproc.
 
 ---
 
@@ -31,9 +27,6 @@ Ce rapport détaille les performances de l'algorithme PageRank sur DBpedia WikiL
 **Paramètres Algorithme**
 - Itérations: 10
 - Damping factor: 0.85
-- Partitions: 200
-- Mémoire executor: 14 GB
-- Mémoire driver: 15 GB
 
 ---
 
@@ -74,7 +67,7 @@ Ce rapport détaille les performances de l'algorithme PageRank sur DBpedia WikiL
 15 |
 10 |
  0 |------
-     n=4
+     n=4v
 ```
 
 ### 3.3 n=6
@@ -186,12 +179,15 @@ Ce rapport détaille les performances de l'algorithme PageRank sur DBpedia WikiL
 ## 7. Fichiers de Résultats et Arborescence
 ```
 results/
-├── config_n2/
-│   └── pagerank_n2_full_results.csv
-├── config_n4/
-│   └── pagerank_n4_full_results.csv
-└── config_n6/
-    └── pagerank_n6_full_results.csv
+    2-nodes/
+        rdd_results.csv
+        df_results.csv
+    4-nodes/
+        rdd_results.csv
+        df_results.csv
+    6-nodes/
+        rdd_results.csv
+        df_results.csv
 ```
 
 ---
@@ -213,11 +209,11 @@ gcloud dataproc clusters create pagerank-cluster-nX \
 ```
 
 ### Scripts Python
-- `rdd_pagerank.py` : RDD Spark, transformations manuelles, bas niveau
-- `df_pagerank.py` : DataFrame Spark, optimisations Catalyst, AQE, Tungsten engine
+- `pagerank_rdd.py` : RDD Spark, transformations manuelles, bas niveau
+- `pagerank_df.py` : DataFrame Spark, optimisations Catalyst, AQE, Tungsten engine
 
 ---
 
 **Équipe:** OUEDRHIRI Mohammed / SAAD Fatimezzahra  
-**Projet GCP:** pagerank-480311
+
 
