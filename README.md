@@ -1,4 +1,4 @@
-# PageRank Tests sur Wikipedia
+# PageRank Tests sur dataset DBpedia WikiLinks
 
 ---
 
