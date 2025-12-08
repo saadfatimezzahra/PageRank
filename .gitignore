@@ -1,10 +1,6 @@
 # Large datasets
 edges.csv
-edges/*
-*.bz2
-*.ttl
-*.csv
-!small_edges.csv     # autorise uniquement le petit fichier de test
+    # autorise uniquement le petit fichier de test
 
 # Python cache
 __pycache__/
